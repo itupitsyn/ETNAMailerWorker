@@ -1,0 +1,62 @@
+name: Build and Copy Image
+
+on:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Сборка Docker-образа
+      - name: Build Docker Image
+        run: docker build -t mailer-worker:latest .
+
+      # 2. Сохранение образа в файл (архив)
+      - name: Save Docker Image
+        run: docker save mailer-worker:latest | gzip > mailer-worker.tar.gz
+
+      # 3. Копирование архива на сервер через SCP
+      - name: Copy tar to Server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VDS_HOST }}
+          username: ${{ secrets.VDS_USER }}
+          password: ${{ secrets.VDS_PASSWORD }}
+          port: 52
+          source: "mailer-worker.tar.gz"
+          target: "/tmp"
+
+      # 4. Загрузка образа из файла и перезапуск контейнера на сервере
+      - name: Load Image and Restart
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VDS_HOST }}
+          username: ${{ secrets.VDS_USER }}
+          password: ${{ secrets.VDS_PASSWORD }}
+          port: 52
+          script: |
+            # Распаковываем и загружаем образ
+            zcat /tmp/mailer-worker.tar.gz | docker load
+            
+            # Удаляем старый контейнер
+            docker stop mailer-worker || true
+            docker rm mailer-worker || true
+            
+            # Запускаем новый
+            docker run -d \
+              --name mailer-worker \
+              --restart always \
+              -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+              -e SMTP_HOST="${{ secrets.SMTP_HOST }}" \
+              -e SMTP_PORT="${{ secrets.SMTP_PORT }}" \
+              -e SMTP_USER="${{ secrets.SMTP_USER }}" \
+              -e SMTP_PASS="${{ secrets.SMTP_PASS }}" \
+              -e TARGET_EMAIL="${{ secrets.TARGET_EMAIL }}" \
+              mailer-worker:latest
+            
+            # Очистка
+            rm /tmp/mailer-worker.tar.gz
+            docker image prune -f
