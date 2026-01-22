@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
             eprintln!("Error processing requests: {:?}", e);
         }
 
-        sleep(Duration::from_secs(60)).await;
+        sleep(Duration::from_secs(300)).await;
     }
 }
 
